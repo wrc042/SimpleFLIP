@@ -1,22 +1,47 @@
 #include "Eigen/Dense"
 #include <iostream>
 #include <omp.h>
+#include <random>
 
 #include <viewer.hpp>
+#include <flip.hpp>
 
 using namespace std;
 
-int main() {
-    Viewer viewer;
-    std::vector<Eigen::Vector2d> points;
-    const bool &is_closed = viewer.is_closed();
+auto sdfbox(Eigen::Vector2d origin, Eigen::Vector2d range) {
+    return [origin, range](Eigen::Vector2d x) {
+        x = x - origin;
+        x = Eigen::Vector2d(std::abs(x.x()), std::abs(x.y()));
+        Eigen::Vector2d q = x - range;
+        Eigen::Vector2d q_ =
+            Eigen::Vector2d((std::max)(q.x(), 0.0), (std::max)(q.y(), 0.0));
+        return q_.norm() + (std::min)((std::max)(q.x(), q.y()), 0.0);
+    };
+};
 
-    auto reset_buffer = [&viewer](const std::vector<Eigen::Vector2d> &points) {
-        viewer.reset_buffer(points);
+auto sdfcircle(Eigen::Vector2d origin, double radius) {
+    return [origin, radius](Eigen::Vector2d x) {
+        return (x - origin).norm() - radius;
     };
-    auto update_buffer = [&viewer](const std::vector<Eigen::Vector2d> &points) {
-        viewer.update_buffer(points);
-    };
+};
+
+int main() {
+    omp_set_nested(true);
+
+    Viewer viewer;
+    const bool &is_closed = viewer.is_closed();
+    FLIPSolver solver(64, 1e-4, 4);
+    viewer.set_radius(solver.get_radius());
+
+    solver.add_particle(sdfcircle(Eigen::Vector2d(0.5, 0.5), 0.2));
+    solver.set_reset_buffer(
+        [&viewer](const std::vector<Eigen::Vector2d> &points) {
+            viewer.reset_buffer(points);
+        });
+    solver.set_update_buffer(
+        [&viewer](const std::vector<Eigen::Vector2d> &points) {
+            viewer.update_buffer(points);
+        });
 
 #pragma omp parallel sections num_threads(2) default(shared)
     {
@@ -24,20 +49,7 @@ int main() {
         { viewer.show(); }
 #pragma omp section
         {
-            double t = 0;
-            Eigen::Vector2d x(sin(t) / 2 + 0.5, cos(t) / 2 + 0.5);
-            std::vector<Eigen::Vector2d> nodes_tmp;
-            nodes_tmp.push_back(x);
-            reset_buffer(nodes_tmp);
-
-            while (!is_closed) {
-                x = Eigen::Vector2d(sin(t) / 2 + 0.5, cos(t) / 2 + 0.5);
-                t += 1e-7;
-
-                nodes_tmp.clear();
-                nodes_tmp.push_back(x);
-                update_buffer(nodes_tmp);
-            }
+            solver.run(is_closed);
         }
     }
     return 0;
