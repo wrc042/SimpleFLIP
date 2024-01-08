@@ -1,6 +1,9 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 class FLIPSolver {
@@ -21,19 +24,21 @@ class FLIPSolver {
         _velocityv.resize(_resolution * (_resolution + 1), 0);
         _velocityv_.resize(_resolution * (_resolution + 1), 0);
         _weightv.resize(_resolution * (_resolution + 1), 0);
-        _marker.resize(_resolution * _resolution, AIR);
+        _marker.resize(_resolution * _resolution);
+        _density.resize(_resolution * _resolution);
 
+        for (int i = 0; i < _resolution * _resolution; i++) {
+            _marker[i] = AIR;
+        }
         for (int i = 0; i < _resolution; i++) {
             _marker[i * _resolution + 0] = SOLID;
             _marker[i * _resolution + 1] = SOLID;
             _marker[i * _resolution + _resolution - 1] = SOLID;
             _marker[i * _resolution + _resolution - 2] = SOLID;
-        }
-        for (int j = 0; j < _resolution; j++) {
-            _marker[(0) * _resolution + j] = SOLID;
-            _marker[(1) * _resolution + j] = SOLID;
-            _marker[(_resolution - 1) * _resolution + j] = SOLID;
-            _marker[(_resolution - 2) * _resolution + j] = SOLID;
+            _marker[(0) * _resolution + i] = SOLID;
+            _marker[(1) * _resolution + i] = SOLID;
+            _marker[(_resolution - 1) * _resolution + i] = SOLID;
+            _marker[(_resolution - 2) * _resolution + i] = SOLID;
         }
     }
 
@@ -49,7 +54,8 @@ class FLIPSolver {
     void step() {
         clear_grid();
         particle2grid();
-        gravity(_time_interval);
+        gravity(_time_interval / _substep);
+        projection();
         grid2particle();
         advection();
     }
@@ -59,9 +65,17 @@ class FLIPSolver {
             _reset_buffer(_particle_position);
         }
         while (!is_closed) {
-            step();
+            double st = omp_get_wtime();
+            for (int i = 0; i < _substep; i++) {
+                step();
+            }
             if (_update_buffer != NULL) {
                 _update_buffer(_particle_position);
+            }
+            double et = omp_get_wtime();
+            if ((1.0 / _max_fps - (et - st)) > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(
+                    (int)(1000 * (1.0 / _max_fps - (et - st)))));
             }
         }
     }
@@ -69,8 +83,8 @@ class FLIPSolver {
         std::uniform_real_distribution<double> dist(0.0, _grid_spacing);
         for (int i = 0; i < _resolution; i++) {
             for (int j = 0; j < _resolution; j++) {
-                Eigen::Vector2d cell_corner(
-                    i * _grid_spacing, (_resolution - 1 - j) * _grid_spacing);
+                Eigen::Vector2d cell_corner(i * _grid_spacing,
+                                            j * _grid_spacing);
                 for (int k = 0; k < _num_marker; k++) {
                     double offsetx = dist(_rand_engine);
                     double offsety = dist(_rand_engine);
@@ -98,17 +112,16 @@ class FLIPSolver {
     }
 
     void particle2grid() {
-        int resolution = _resolution;
-        int grid_spacing = _grid_spacing;
-        auto get_idx = [resolution](double x, double y) {
-            int xidx = floor(x * resolution);
-            int yidx = floor(y * resolution);
+        double inv_grid_spacing = 1.0 / _grid_spacing;
+        auto get_idx = [inv_grid_spacing](double x, double y) {
+            int xidx = floor(x * inv_grid_spacing);
+            int yidx = floor(y * inv_grid_spacing);
             return std::array<int, 2>{xidx, yidx};
         };
-        auto get_frac = [resolution, grid_spacing](double x, double y, int xidx,
-                                                   int yidx) {
-            double fracx = x * resolution - xidx;
-            double fracy = y * resolution - yidx;
+        auto get_frac = [inv_grid_spacing](double x, double y, int xidx,
+                                           int yidx) {
+            double fracx = x * inv_grid_spacing - xidx;
+            double fracy = y * inv_grid_spacing - yidx;
             return std::array<double, 4>{fracx * fracy, (1 - fracx) * fracy,
                                          fracx * (1 - fracy),
                                          (1 - fracx) * (1 - fracy)};
@@ -119,15 +132,15 @@ class FLIPSolver {
 
             auto idxu =
                 get_idx(_particle_position[i].x(),
-                        _particle_position[i].y() + 0.5 * _grid_spacing);
+                        _particle_position[i].y() - 0.5 * _grid_spacing);
             auto fracu =
                 get_frac(_particle_position[i].x(),
-                         _particle_position[i].y() + 0.5 * _grid_spacing,
+                         _particle_position[i].y() - 0.5 * _grid_spacing,
                          idxu[0], idxu[1]);
-            auto idxv = get_idx(_particle_position[i].x() + 0.5 * _grid_spacing,
+            auto idxv = get_idx(_particle_position[i].x() - 0.5 * _grid_spacing,
                                 _particle_position[i].y());
             auto fracv =
-                get_frac(_particle_position[i].x() + 0.5 * _grid_spacing,
+                get_frac(_particle_position[i].x() - 0.5 * _grid_spacing,
                          _particle_position[i].y(), idxv[0], idxv[1]);
 
             for (int j = 0; j < 4; j++) {
@@ -146,10 +159,10 @@ class FLIPSolver {
         }
 #pragma omp parallel for
         for (int i = 0; i < _resolution * (_resolution + 1); i++) {
-            if (_weightu[i] > 0.0) {
+            if (_weightu[i] > 1e-6) {
                 _velocityu[i] /= _weightu[i];
             }
-            if (_weightv[i] > 0.0) {
+            if (_weightv[i] > 1e-6) {
                 _velocityv[i] /= _weightv[i];
             }
             _velocityu_[i] = _velocityu[i];
@@ -157,17 +170,16 @@ class FLIPSolver {
         }
     }
     void grid2particle() {
-        int resolution = _resolution;
-        int grid_spacing = _grid_spacing;
-        auto get_idx = [resolution](double x, double y) {
-            int xidx = floor(x * resolution);
-            int yidx = floor(y * resolution);
+        double inv_grid_spacing = 1.0 / _grid_spacing;
+        auto get_idx = [inv_grid_spacing](double x, double y) {
+            int xidx = floor(x * inv_grid_spacing);
+            int yidx = floor(y * inv_grid_spacing);
             return std::array<int, 2>{xidx, yidx};
         };
-        auto get_frac = [resolution, grid_spacing](double x, double y, int xidx,
-                                                   int yidx) {
-            double fracx = x * resolution - xidx;
-            double fracy = y * resolution - yidx;
+        auto get_frac = [inv_grid_spacing](double x, double y, int xidx,
+                                           int yidx) {
+            double fracx = x * inv_grid_spacing - xidx;
+            double fracy = y * inv_grid_spacing - yidx;
             return std::array<double, 4>{fracx * fracy, (1 - fracx) * fracy,
                                          fracx * (1 - fracy),
                                          (1 - fracx) * (1 - fracy)};
@@ -184,15 +196,15 @@ class FLIPSolver {
 
             auto idxu =
                 get_idx(_particle_position[i].x(),
-                        _particle_position[i].y() + 0.5 * _grid_spacing);
+                        _particle_position[i].y() - 0.5 * _grid_spacing);
             auto fracu =
                 get_frac(_particle_position[i].x(),
-                         _particle_position[i].y() + 0.5 * _grid_spacing,
+                         _particle_position[i].y() - 0.5 * _grid_spacing,
                          idxu[0], idxu[1]);
-            auto idxv = get_idx(_particle_position[i].x() + 0.5 * _grid_spacing,
+            auto idxv = get_idx(_particle_position[i].x() - 0.5 * _grid_spacing,
                                 _particle_position[i].y());
             auto fracv =
-                get_frac(_particle_position[i].x() + 0.5 * _grid_spacing,
+                get_frac(_particle_position[i].x() - 0.5 * _grid_spacing,
                          _particle_position[i].y(), idxv[0], idxv[1]);
 
             for (int j = 0; j < 4; j++) {
@@ -238,19 +250,159 @@ class FLIPSolver {
         }
     }
 
-    // void projection() {
+    void projection() {
+        double inv_grid_spacing = 1.0 / _grid_spacing;
+        auto get_idx = [inv_grid_spacing](double x, double y) {
+            int xidx = floor(x * inv_grid_spacing);
+            int yidx = floor(y * inv_grid_spacing);
+            return std::array<int, 2>{xidx, yidx};
+        };
+        std::map<std::array<int, 2>, int> grid2mat;
+        for (int i = 0; i < _resolution * _resolution; i++) {
+            _density[i] = 0.0;
+            if (_marker[i] != SOLID) {
+                _marker[i] = AIR;
+            }
+        }
+        for (int i = 0; i < _num_particle; i++) {
+            auto idx =
+                get_idx(_particle_position[i].x(), _particle_position[i].y());
+            if (_marker[idx[0] * _resolution + idx[1]] == AIR) {
+                _marker[idx[0] * _resolution + idx[1]] = FLUID;
+            }
+            _density[idx[0] * _resolution + idx[1]] += 1.0;
+        }
+        int vecsize = 0;
+        for (int i = 0; i < _resolution; i++) {
+            for (int j = 0; j < _resolution; j++) {
+                if (_marker[i * _resolution + j] == FLUID) {
+                    grid2mat[{i, j}] = vecsize;
+                    vecsize++;
+                }
+            }
+        }
+        typedef Eigen::Triplet<double> T;
+        std::vector<T> triple_list;
+        Eigen::SparseMatrix<double> A(vecsize, vecsize);
+        Eigen::VectorXd b(vecsize);
+        Eigen::VectorXd p(vecsize);
 
-    //     for (int i = 0; i < _resolution; i++) {
-    //         _velocityu[0 * _resolution + i] = 0;
-    //         _velocityu[1 * _resolution + i] = 0;
-    //         _velocityu[(_resolution)*_resolution + i] = 0;
-    //         _velocityu[(_resolution - 1) * _resolution + i] = 0;
-    //         _velocityv[i * (_resolution + 1) + 0] = 0;
-    //         _velocityv[i * (_resolution + 1) + 1] = 0;
-    //         _velocityv[i * (_resolution + 1) + _resolution] = 0;
-    //         _velocityv[i * (_resolution + 1) + _resolution - 1] = 0;
-    //     }
-    // }
+        int cnt = 0;
+
+        for (int i = 0; i < _resolution; i++) {
+            for (int j = 0; j < _resolution; j++) {
+                if (_marker[i * _resolution + j] == FLUID) {
+                    double btmp =
+                        -_grid_spacing *
+                        (_velocityu[(i + 1) * _resolution + j] -
+                         _velocityu[i * _resolution + j] +
+                         _velocityv[i * (_resolution + 1) + j + 1] -
+                         _velocityv[i * (_resolution + 1) + j] -
+                         _density_factor * _grid_spacing * _grid_spacing *
+                             _grid_spacing *
+                             (_density[i * _resolution + j] - _num_marker) /
+                             _num_marker);
+                    double coeff = 0;
+                    if (_marker[(i - 1) * _resolution + j] == FLUID) {
+                        coeff += 1;
+                        triple_list.push_back(T(cnt, grid2mat[{i - 1, j}], -1));
+                    } else if (_marker[(i - 1) * _resolution + j] == AIR) {
+                        coeff += 1;
+                    } else {
+                        btmp -= _grid_spacing * _velocityu[i * _resolution + j];
+                    }
+                    if (_marker[(i + 1) * _resolution + j] == FLUID) {
+                        coeff += 1;
+                        triple_list.push_back(T(cnt, grid2mat[{i + 1, j}], -1));
+                    } else if (_marker[(i + 1) * _resolution + j] == AIR) {
+                        coeff += 1;
+                    } else {
+                        btmp += _grid_spacing *
+                                _velocityu[(i + 1) * _resolution + j];
+                    }
+                    if (_marker[i * _resolution + j - 1] == FLUID) {
+                        coeff += 1;
+                        triple_list.push_back(T(cnt, grid2mat[{i, j - 1}], -1));
+                    } else if (_marker[i * _resolution + j - 1] == AIR) {
+                        coeff += 1;
+                    } else {
+                        btmp -= _grid_spacing *
+                                _velocityv[i * (_resolution + 1) + j];
+                    }
+                    if (_marker[i * _resolution + j + 1] == FLUID) {
+                        coeff += 1;
+                        triple_list.push_back(T(cnt, grid2mat[{i, j + 1}], -1));
+                    } else if (_marker[i * _resolution + j + 1] == AIR) {
+                        coeff += 1;
+                    } else {
+                        btmp += _grid_spacing *
+                                _velocityv[i * (_resolution + 1) + j + 1];
+                    }
+                    triple_list.push_back(T(cnt, grid2mat[{i, j}], coeff));
+                    b(cnt) = btmp;
+                    cnt++;
+                }
+            }
+        }
+        A.setFromTriplets(triple_list.begin(), triple_list.end());
+        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                                 Eigen::Lower | Eigen::Upper>
+            cg;
+        cg.compute(A);
+        p = cg.solve(b);
+        if (cg.info() != Eigen::Success) {
+            std::cout << "projection solver failed" << std::endl;
+            return;
+        }
+
+        for (int i = 1; i < _resolution; i++) {
+            for (int j = 0; j < _resolution; j++) {
+                if (_marker[i * _resolution + j] == FLUID &&
+                    _marker[(i - 1) * _resolution + j] == FLUID) {
+                    _velocityu[i * _resolution + j] -=
+                        (p(grid2mat[{i, j}]) - p(grid2mat[{i - 1, j}])) /
+                        _grid_spacing;
+                } else if (_marker[i * _resolution + j] == FLUID &&
+                           _marker[(i - 1) * _resolution + j] == AIR) {
+                    _velocityu[i * _resolution + j] -=
+                        p(grid2mat[{i, j}]) / _grid_spacing;
+                } else if (_marker[i * _resolution + j] == AIR &&
+                           _marker[(i - 1) * _resolution + j] == FLUID) {
+                    _velocityu[i * _resolution + j] +=
+                        p(grid2mat[{i - 1, j}]) / _grid_spacing;
+                }
+            }
+        }
+        for (int i = 0; i < _resolution; i++) {
+            for (int j = 1; j < _resolution; j++) {
+                if (_marker[i * _resolution + j] == FLUID &&
+                    _marker[i * _resolution + j - 1] == FLUID) {
+                    _velocityv[i * (_resolution + 1) + j] -=
+                        (p(grid2mat[{i, j}]) - p(grid2mat[{i, j - 1}])) /
+                        _grid_spacing;
+                } else if (_marker[i * _resolution + j] == FLUID &&
+                           _marker[i * _resolution + j - 1] == AIR) {
+                    _velocityv[i * (_resolution + 1) + j] -=
+                        p(grid2mat[{i, j}]) / _grid_spacing;
+                } else if (_marker[i * _resolution + j] == AIR &&
+                           _marker[i * _resolution + j - 1] == FLUID) {
+                    _velocityv[i * (_resolution + 1) + j] +=
+                        p(grid2mat[{i, j - 1}]) / _grid_spacing;
+                }
+            }
+        }
+
+        for (int i = 0; i < _resolution; i++) {
+            _velocityu[0 * _resolution + i] = 0;
+            _velocityu[1 * _resolution + i] = 0;
+            _velocityu[(_resolution)*_resolution + i] = 0;
+            _velocityu[(_resolution - 1) * _resolution + i] = 0;
+            _velocityv[i * (_resolution + 1) + 0] = 0;
+            _velocityv[i * (_resolution + 1) + 1] = 0;
+            _velocityv[i * (_resolution + 1) + _resolution] = 0;
+            _velocityv[i * (_resolution + 1) + _resolution - 1] = 0;
+        }
+    }
 
     std::function<void(const std::vector<Eigen::Vector2d> &)> _reset_buffer;
     std::function<void(const std::vector<Eigen::Vector2d> &)> _update_buffer;
@@ -271,9 +423,13 @@ class FLIPSolver {
 
     enum Marker { AIR, SOLID, FLUID };
     std::vector<int> _marker;
+    std::vector<double> _density;
     // particle num per cell
     int _num_marker;
     std::default_random_engine _rand_engine;
 
     double _flip_weight = 0.95;
+    int _substep = 1;
+    double _density_factor = 20;
+    double _max_fps = 60;
 };
