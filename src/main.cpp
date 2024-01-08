@@ -3,8 +3,8 @@
 #include <omp.h>
 #include <random>
 
-#include <viewer.hpp>
 #include <flip.hpp>
+#include <viewer.hpp>
 
 using namespace std;
 
@@ -30,10 +30,10 @@ int main() {
 
     Viewer viewer;
     const bool &is_closed = viewer.is_closed();
-    FLIPSolver solver(64, 5e-3, 8);
+    FLIPSolver solver(80, 5e-3, 8);
     viewer.set_radius(solver.get_radius());
 
-    solver.add_particle(sdfcircle(Eigen::Vector2d(0.5, 0.5), 0.2));
+    solver.add_particle(sdfbox(Eigen::Vector2d(0.2, 0.5), Eigen::Vector2d(0.2, 0.5)));
     solver.set_reset_buffer(
         [&viewer](const std::vector<Eigen::Vector2d> &points) {
             viewer.reset_buffer(points);
@@ -48,9 +48,7 @@ int main() {
 #pragma omp section
         { viewer.show(); }
 #pragma omp section
-        {
-            solver.run(is_closed);
-        }
+        { solver.run(is_closed); }
     }
     return 0;
 }

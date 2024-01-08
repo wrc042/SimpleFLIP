@@ -25,7 +25,6 @@ class FLIPSolver {
         _velocityv_.resize(_resolution * (_resolution + 1), 0);
         _weightv.resize(_resolution * (_resolution + 1), 0);
         _marker.resize(_resolution * _resolution);
-        _density.resize(_resolution * _resolution);
 
         for (int i = 0; i < _resolution * _resolution; i++) {
             _marker[i] = AIR;
@@ -52,12 +51,12 @@ class FLIPSolver {
         _update_buffer = func;
     }
     void step() {
+        advection();
         clear_grid();
         particle2grid();
         gravity(_time_interval / _substep);
         projection();
         grid2particle();
-        advection();
     }
     double get_radius() { return _grid_spacing / sqrt(_num_marker); }
     void run(const bool &is_closed) {
@@ -259,7 +258,6 @@ class FLIPSolver {
         };
         std::map<std::array<int, 2>, int> grid2mat;
         for (int i = 0; i < _resolution * _resolution; i++) {
-            _density[i] = 0.0;
             if (_marker[i] != SOLID) {
                 _marker[i] = AIR;
             }
@@ -270,7 +268,6 @@ class FLIPSolver {
             if (_marker[idx[0] * _resolution + idx[1]] == AIR) {
                 _marker[idx[0] * _resolution + idx[1]] = FLUID;
             }
-            _density[idx[0] * _resolution + idx[1]] += 1.0;
         }
         int vecsize = 0;
         for (int i = 0; i < _resolution; i++) {
@@ -292,16 +289,11 @@ class FLIPSolver {
         for (int i = 0; i < _resolution; i++) {
             for (int j = 0; j < _resolution; j++) {
                 if (_marker[i * _resolution + j] == FLUID) {
-                    double btmp =
-                        -_grid_spacing *
-                        (_velocityu[(i + 1) * _resolution + j] -
-                         _velocityu[i * _resolution + j] +
-                         _velocityv[i * (_resolution + 1) + j + 1] -
-                         _velocityv[i * (_resolution + 1) + j] -
-                         _density_factor * _grid_spacing * _grid_spacing *
-                             _grid_spacing *
-                             (_density[i * _resolution + j] - _num_marker) /
-                             _num_marker);
+                    double btmp = -_grid_spacing *
+                                  (_velocityu[(i + 1) * _resolution + j] -
+                                   _velocityu[i * _resolution + j] +
+                                   _velocityv[i * (_resolution + 1) + j + 1] -
+                                   _velocityv[i * (_resolution + 1) + j]);
                     double coeff = 0;
                     if (_marker[(i - 1) * _resolution + j] == FLUID) {
                         coeff += 1;
@@ -395,12 +387,16 @@ class FLIPSolver {
         for (int i = 0; i < _resolution; i++) {
             _velocityu[0 * _resolution + i] = 0;
             _velocityu[1 * _resolution + i] = 0;
+            _velocityu[3 * _resolution + i] = 0;
             _velocityu[(_resolution)*_resolution + i] = 0;
             _velocityu[(_resolution - 1) * _resolution + i] = 0;
+            _velocityu[(_resolution - 2) * _resolution + i] = 0;
             _velocityv[i * (_resolution + 1) + 0] = 0;
             _velocityv[i * (_resolution + 1) + 1] = 0;
+            _velocityv[i * (_resolution + 1) + 2] = 0;
             _velocityv[i * (_resolution + 1) + _resolution] = 0;
             _velocityv[i * (_resolution + 1) + _resolution - 1] = 0;
+            _velocityv[i * (_resolution + 1) + _resolution - 2] = 0;
         }
     }
 
@@ -423,13 +419,11 @@ class FLIPSolver {
 
     enum Marker { AIR, SOLID, FLUID };
     std::vector<int> _marker;
-    std::vector<double> _density;
     // particle num per cell
     int _num_marker;
     std::default_random_engine _rand_engine;
 
     double _flip_weight = 0.95;
     int _substep = 1;
-    double _density_factor = 20;
     double _max_fps = 60;
 };
