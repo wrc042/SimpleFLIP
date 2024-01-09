@@ -6,6 +6,13 @@
 #include <thread>
 #include <vector>
 
+#include <amgcl/amg.hpp>
+#include <amgcl/backend/eigen.hpp>
+#include <amgcl/coarsening/smoothed_aggregation.hpp>
+#include <amgcl/make_solver.hpp>
+#include <amgcl/relaxation/spai0.hpp>
+#include <amgcl/solver/bicgstab.hpp>
+
 class FLIPSolver {
   public:
     FLIPSolver(int resolution, double time_interval, double num_marker)
@@ -280,7 +287,8 @@ class FLIPSolver {
         }
         typedef Eigen::Triplet<double> T;
         std::vector<T> triple_list;
-        Eigen::SparseMatrix<double> A(vecsize, vecsize);
+        // Eigen::SparseMatrix<double> A(vecsize, vecsize);
+        Eigen::SparseMatrix<double, Eigen::RowMajor> A(vecsize, vecsize);
         Eigen::VectorXd b(vecsize);
         Eigen::VectorXd p(vecsize);
 
@@ -337,14 +345,25 @@ class FLIPSolver {
             }
         }
         A.setFromTriplets(triple_list.begin(), triple_list.end());
-        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
-                                 Eigen::Lower | Eigen::Upper>
-            cg;
-        cg.compute(A);
-        p = cg.solve(b);
-        if (cg.info() != Eigen::Success) {
-            std::cout << "projection solver failed" << std::endl;
-            return;
+        if (_using_amgcl) {
+            using Solver = amgcl::make_solver<
+                amgcl::amg<amgcl::backend::eigen<double>,
+                           amgcl::coarsening::smoothed_aggregation,
+                           amgcl::relaxation::spai0>,
+                amgcl::solver::bicgstab<amgcl::backend::eigen<double>>>;
+            Solver solve(A);
+            p.setZero();
+            solve(b, p);
+        } else {
+            Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                                     Eigen::Lower | Eigen::Upper>
+                cg;
+            cg.compute(A);
+            p = cg.solve(b);
+            if (cg.info() != Eigen::Success) {
+                std::cout << "projection solver failed" << std::endl;
+                return;
+            }
         }
 
         for (int i = 1; i < _resolution; i++) {
@@ -426,4 +445,5 @@ class FLIPSolver {
     double _flip_weight = 0.95;
     int _substep = 1;
     double _max_fps = 60;
+    bool _using_amgcl = true;
 };

@@ -30,7 +30,7 @@ int main() {
 
     Viewer viewer;
     const bool &is_closed = viewer.is_closed();
-    FLIPSolver solver(80, 5e-3, 8);
+    FLIPSolver solver(256, 5e-3, 8);
     viewer.set_radius(solver.get_radius());
 
     solver.add_particle(sdfbox(Eigen::Vector2d(0.2, 0.5), Eigen::Vector2d(0.2, 0.5)));
