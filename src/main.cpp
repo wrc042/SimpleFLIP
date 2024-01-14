@@ -30,9 +30,12 @@ int main() {
 
     Viewer viewer;
     const bool &is_closed = viewer.is_closed();
-    FLIPSolver solver(256, 5e-3, 8);
+    // set resolution here
+    FLIPSolver solver(128, 5e-3, 8);
     viewer.set_radius(solver.get_radius());
 
+    // add fluid here
+    // the domain is located at [0, 1] x [0, 1]
     solver.add_particle(sdfbox(Eigen::Vector2d(0.2, 0.5), Eigen::Vector2d(0.2, 0.5)));
     solver.set_reset_buffer(
         [&viewer](const std::vector<Eigen::Vector2d> &points) {
