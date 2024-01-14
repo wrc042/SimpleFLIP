@@ -75,7 +75,7 @@ class Viewer {
 
   protected:
     void set_window() {
-        polyscope::options::programName = "point viewer";
+        polyscope::options::programName = "simple FLIP";
         // default 1
         polyscope::options::verbosity = 1;
         // default 1
@@ -87,7 +87,7 @@ class Viewer {
         // default true
         polyscope::options::buildGui = true;
         // default true
-        polyscope::options::openImGuiWindowForUserCallback = true;
+        polyscope::options::openImGuiWindowForUserCallback = false;
         // default true
         polyscope::options::usePrefsFile = true;
     }
