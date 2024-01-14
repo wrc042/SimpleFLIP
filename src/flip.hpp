@@ -119,47 +119,43 @@ class FLIPSolver {
 
     void particle2grid() {
         double inv_grid_spacing = 1.0 / _grid_spacing;
-        auto get_idx = [inv_grid_spacing](double x, double y) {
+        double *particle_position =
+            reinterpret_cast<double *>(_particle_position.data());
+        double *particle_velocity =
+            reinterpret_cast<double *>(_particle_velocity.data());
+        auto get_frac = [&inv_grid_spacing](double x, double y) {
             int xidx = floor(x * inv_grid_spacing);
             int yidx = floor(y * inv_grid_spacing);
-            return std::array<int, 2>{xidx, yidx};
-        };
-        auto get_frac = [inv_grid_spacing](double x, double y, int xidx,
-                                           int yidx) {
             double fracx = x * inv_grid_spacing - xidx;
             double fracy = y * inv_grid_spacing - yidx;
-            return std::array<double, 4>{fracx * fracy, (1 - fracx) * fracy,
-                                         fracx * (1 - fracy),
-                                         (1 - fracx) * (1 - fracy)};
+            return std::tuple(std::array<int, 2>{xidx, yidx},
+                              std::array<double, 4>{fracx * fracy,
+                                                    (1 - fracx) * fracy,
+                                                    fracx * (1 - fracy),
+                                                    (1 - fracx) * (1 - fracy)});
         };
         for (int i = 0; i < _num_particle; i++) {
             std::array<int, 4> offsetx = {0, 1, 0, 1};
             std::array<int, 4> offsety = {0, 0, 1, 1};
 
-            auto idxu =
-                get_idx(_particle_position[i].x(),
-                        _particle_position[i].y() - 0.5 * _grid_spacing);
-            auto fracu =
-                get_frac(_particle_position[i].x(),
-                         _particle_position[i].y() - 0.5 * _grid_spacing,
-                         idxu[0], idxu[1]);
-            auto idxv = get_idx(_particle_position[i].x() - 0.5 * _grid_spacing,
-                                _particle_position[i].y());
-            auto fracv =
-                get_frac(_particle_position[i].x() - 0.5 * _grid_spacing,
-                         _particle_position[i].y(), idxv[0], idxv[1]);
+            auto [idxu, fracu] =
+                get_frac(particle_position[i * 2 + 0],
+                         particle_position[i * 2 + 1] - 0.5 * _grid_spacing);
+            auto [idxv, fracv] =
+                get_frac(particle_position[i * 2 + 0] - 0.5 * _grid_spacing,
+                         particle_position[i * 2 + 1]);
 
             for (int j = 0; j < 4; j++) {
                 int tmpidx = 0;
                 tmpidx = (idxu[0] + offsetx[j]) * _resolution +
                          (idxu[1] + offsety[j]);
-                _velocityu[tmpidx] += _particle_velocity[i].x() * fracu[j];
+                _velocityu[tmpidx] += particle_velocity[i * 2 + 0] * fracu[j];
                 _weightu[tmpidx] += fracu[j];
 
                 tmpidx = (idxv[0] + offsetx[j]) * (_resolution + 1) +
                          (idxv[1] + offsety[j]);
 
-                _velocityv[tmpidx] += _particle_velocity[i].y() * fracv[j];
+                _velocityv[tmpidx] += particle_velocity[i * 2 + 1] * fracv[j];
                 _weightv[tmpidx] += fracv[j];
             }
         }
@@ -177,18 +173,16 @@ class FLIPSolver {
     }
     void grid2particle() {
         double inv_grid_spacing = 1.0 / _grid_spacing;
-        auto get_idx = [inv_grid_spacing](double x, double y) {
+        auto get_frac = [&inv_grid_spacing](double x, double y) {
             int xidx = floor(x * inv_grid_spacing);
             int yidx = floor(y * inv_grid_spacing);
-            return std::array<int, 2>{xidx, yidx};
-        };
-        auto get_frac = [inv_grid_spacing](double x, double y, int xidx,
-                                           int yidx) {
             double fracx = x * inv_grid_spacing - xidx;
             double fracy = y * inv_grid_spacing - yidx;
-            return std::array<double, 4>{fracx * fracy, (1 - fracx) * fracy,
-                                         fracx * (1 - fracy),
-                                         (1 - fracx) * (1 - fracy)};
+            return std::tuple(std::array<int, 2>{xidx, yidx},
+                              std::array<double, 4>{fracx * fracy,
+                                                    (1 - fracx) * fracy,
+                                                    fracx * (1 - fracy),
+                                                    (1 - fracx) * (1 - fracy)});
         };
 #pragma omp parallel for
         for (int i = 0; i < _num_particle; i++) {
@@ -200,18 +194,12 @@ class FLIPSolver {
             double dvu = 0.0;
             double dvv = 0.0;
 
-            auto idxu =
-                get_idx(_particle_position[i].x(),
-                        _particle_position[i].y() - 0.5 * _grid_spacing);
-            auto fracu =
+            auto [idxu, fracu] =
                 get_frac(_particle_position[i].x(),
-                         _particle_position[i].y() - 0.5 * _grid_spacing,
-                         idxu[0], idxu[1]);
-            auto idxv = get_idx(_particle_position[i].x() - 0.5 * _grid_spacing,
-                                _particle_position[i].y());
-            auto fracv =
+                         _particle_position[i].y() - 0.5 * _grid_spacing);
+            auto [idxv, fracv] =
                 get_frac(_particle_position[i].x() - 0.5 * _grid_spacing,
-                         _particle_position[i].y(), idxv[0], idxv[1]);
+                         _particle_position[i].y());
 
             for (int j = 0; j < 4; j++) {
                 int tmpidx = 0;
@@ -287,7 +275,6 @@ class FLIPSolver {
         }
         typedef Eigen::Triplet<double> T;
         std::vector<T> triple_list;
-        // Eigen::SparseMatrix<double> A(vecsize, vecsize);
         Eigen::SparseMatrix<double, Eigen::RowMajor> A(vecsize, vecsize);
         Eigen::VectorXd b(vecsize);
         Eigen::VectorXd p(vecsize);
