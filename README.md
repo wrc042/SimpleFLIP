@@ -1,6 +1,6 @@
 # Simple FLIP
 
-This repo gives simple implementation for 2D FLIP fluid simulation.
+This repo gives a simple implementation for 2D FLIP fluid simulation.
 
 ## Configuration
 
@@ -17,12 +17,6 @@ xmake run
 
 ## Screenshots
 
-<img src="imgs/fluid0.jpg" alt="fluid0" width="45%">
+![fluid0](img/fluid0)![fluid1](img/fluid1)
 
-<img src="imgs/fluid1.jpg" alt="fluid1" width="45%">
-
-<br>
-
-<img src="imgs/fluid2.jpg" alt="fluid2" width="45%">
-
-<img src="imgs/fluid3.jpg" alt="fluid3" width="45%">
+![fluid2](img/fluid2)![fluid3](img/fluid3)
