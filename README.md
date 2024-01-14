@@ -17,6 +17,12 @@ xmake run
 
 ## Screenshots
 
-![fluid0](img/fluid0)![fluid1](img/fluid1)
+<div align=center>
+<img src="imgs/fluid0.jpg" alt="fluid0" width="45%" style="display: inline-block;">
+<img src="imgs/fluid1.jpg" alt="fluid1" width="45%" style="display: inline-block;">
+</div>
 
-![fluid2](img/fluid2)![fluid3](img/fluid3)
+<div align=center>
+<img src="imgs/fluid2.jpg" alt="fluid2" width="45%" style="display: inline-block;">
+<img src="imgs/fluid3.jpg" alt="fluid3" width="45%" style="display: inline-block;">
+</div>
