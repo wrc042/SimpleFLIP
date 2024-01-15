@@ -233,14 +233,20 @@ class FLIPSolver {
 #pragma omp parallel for
         for (int i = 0; i < _num_particle; i++) {
             _particle_position[i] += _particle_velocity[i] * _time_interval;
-            _particle_position[i].x() =
-                (std::max)(_grid_spacing * 2, _particle_position[i].x());
-            _particle_position[i].x() =
-                (std::min)(1 - _grid_spacing * 2, _particle_position[i].x());
-            _particle_position[i].y() =
-                (std::max)(_grid_spacing * 2, _particle_position[i].y());
-            _particle_position[i].y() =
-                (std::min)(1 - _grid_spacing * 2, _particle_position[i].y());
+            if (_particle_position[i].x() < _grid_spacing * 2.5) {
+                _particle_velocity[i].x() = (std::max)(0.0, _particle_velocity[i].x());
+                _particle_position[i].x() = _grid_spacing * 2.5;
+            } else if (_particle_position[i].x() > 1 - _grid_spacing * 2.5) {
+                _particle_velocity[i].x() = (std::min)(0.0, _particle_velocity[i].x());
+                _particle_position[i].x() = 1 - _grid_spacing * 2.5;
+            }
+            if (_particle_position[i].y() < _grid_spacing * 2.5) {
+                _particle_velocity[i].y() = (std::max)(0.0, _particle_velocity[i].y());
+                _particle_position[i].y() = _grid_spacing * 2.5;
+            } else if (_particle_position[i].y() > 1 - _grid_spacing * 2.5) {
+                _particle_velocity[i].y() = (std::min)(0.0, _particle_velocity[i].y());
+                _particle_position[i].y() = 1 - _grid_spacing * 2.5;
+            }
         }
     }
 
@@ -393,16 +399,12 @@ class FLIPSolver {
         for (int i = 0; i < _resolution; i++) {
             _velocityu[0 * _resolution + i] = 0;
             _velocityu[1 * _resolution + i] = 0;
-            _velocityu[3 * _resolution + i] = 0;
             _velocityu[(_resolution)*_resolution + i] = 0;
             _velocityu[(_resolution - 1) * _resolution + i] = 0;
-            _velocityu[(_resolution - 2) * _resolution + i] = 0;
             _velocityv[i * (_resolution + 1) + 0] = 0;
             _velocityv[i * (_resolution + 1) + 1] = 0;
-            _velocityv[i * (_resolution + 1) + 2] = 0;
             _velocityv[i * (_resolution + 1) + _resolution] = 0;
             _velocityv[i * (_resolution + 1) + _resolution - 1] = 0;
-            _velocityv[i * (_resolution + 1) + _resolution - 2] = 0;
         }
     }
 
